@@ -1,0 +1,21 @@
+name: Check
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install SSH test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server iproute2 python3
+          sudo mkdir -p /run/sshd
+      - run: make check
+      - run: make integration
+      - run: make soak SOAK_DURATION=30s SOAK_TIMEOUT=1m

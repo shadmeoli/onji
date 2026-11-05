@@ -1,0 +1,6 @@
+/bin/
+*.test
+*.prof
+coverage.out
+__pycache__/
+*.pyc
