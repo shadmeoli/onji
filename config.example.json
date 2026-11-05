@@ -1,0 +1,16 @@
+{
+  "poll_interval": "5s",
+  "command_timeout": "15s",
+  "max_services_per_host": 256,
+  "max_processes_per_host": 2048,
+  "hosts": [
+    {
+      "name": "dev",
+      "ssh": "my-dev-server",
+      "discovery": "all",
+      "auto_forward": true,
+      "include_ports": [3000, 5173, 8000, 8080],
+      "exclude_ports": [22]
+    }
+  ]
+}
