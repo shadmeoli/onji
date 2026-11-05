@@ -1,0 +1,14 @@
+[Unit]
+Description=Onji automatic SSH port forwarding
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/onjid
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+KillMode=control-group
+UMask=0077
+
+[Install]
+WantedBy=default.target
