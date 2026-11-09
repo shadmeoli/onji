@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
+
+	"onji/internal/config"
 )
 
 // Options controls where the config is written and where messages go.
@@ -133,7 +136,13 @@ func Run(opts Options) error {
 	}
 	var body []byte
 	switch mode {
-	case "interactive", "manual":
+	case "interactive":
+		var err error
+		body, err = interactive(in, opts.Out)
+		if err != nil {
+			return err
+		}
+	case "manual":
 		body = Template()
 	default:
 		return fmt.Errorf("unknown setup mode %q", mode)
@@ -184,6 +193,183 @@ func choose(in *bufio.Reader, out io.Writer) (string, error) {
 			fmt.Fprintln(out, "Enter interactive or manual.")
 		}
 	}
+}
+
+func interactive(in *bufio.Reader, out io.Writer) ([]byte, error) {
+	fmt.Fprintln(out, "Press Enter to accept a default.")
+	name, err := until(in, out, "Host name [dev]: ", func(answer string) (string, error) {
+		if answer == "" {
+			answer = "dev"
+		}
+		if err := checkHost(answer, "dev", "all", nil, []int{22}); err != nil {
+			return "", err
+		}
+		return answer, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	target, err := until(in, out, "SSH alias or user@host: ", func(answer string) (string, error) {
+		if answer == "" {
+			return "", errors.New("an SSH alias or user@host is required")
+		}
+		if err := checkHost(name, answer, "all", nil, []int{22}); err != nil {
+			return "", err
+		}
+		return answer, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	discovery, err := until(in, out, "Discovery (all or new) [all]: ", func(answer string) (string, error) {
+		if answer == "" {
+			answer = "all"
+		}
+		if answer != "all" && answer != "new" {
+			return "", errors.New("discovery must be all or new")
+		}
+		return answer, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	forward := true
+	for {
+		answer, err := ask(in, out, "Automatically forward discovered ports? [Y/n]: ")
+		if err != nil {
+			return nil, err
+		}
+		switch strings.ToLower(answer) {
+		case "", "y", "yes":
+			forward = true
+		case "n", "no":
+			forward = false
+		default:
+			fmt.Fprintln(out, "Enter yes or no.")
+			continue
+		}
+		break
+	}
+	include, err := askPorts(in, out, "Include ports (comma-separated, empty discovers all): ", nil, func(ports []int) error {
+		return checkHost(name, target, discovery, ports, []int{22})
+	})
+	if err != nil {
+		return nil, err
+	}
+	exclude, err := askPorts(in, out, `Exclude ports [22] ("none" excludes nothing): `, []int{22}, func(ports []int) error {
+		return checkHost(name, target, discovery, include, ports)
+	})
+	if err != nil {
+		return nil, err
+	}
+	doc := example()
+	doc.Hosts[0] = host{
+		Name:         name,
+		SSH:          target,
+		Discovery:    discovery,
+		AutoForward:  forward,
+		IncludePorts: append([]int{}, include...),
+		ExcludePorts: append([]int{}, exclude...),
+	}
+	body, err := marshal(doc)
+	if err != nil {
+		return nil, err
+	}
+	if err := validate(body); err != nil {
+		return nil, err
+	}
+	return body, nil
+}
+
+func until(in *bufio.Reader, out io.Writer, prompt string, parse func(string) (string, error)) (string, error) {
+	for {
+		answer, err := ask(in, out, prompt)
+		if err != nil {
+			return "", err
+		}
+		value, err := parse(answer)
+		if err != nil {
+			fmt.Fprintln(out, err)
+			continue
+		}
+		return value, nil
+	}
+}
+
+func askPorts(in *bufio.Reader, out io.Writer, prompt string, empty []int, check func([]int) error) ([]int, error) {
+	for {
+		answer, err := ask(in, out, prompt)
+		if err != nil {
+			return nil, err
+		}
+		var ports []int
+		switch {
+		case answer == "":
+			ports = append([]int{}, empty...)
+		case strings.EqualFold(answer, "none"):
+			ports = []int{}
+		default:
+			ports, err = parsePorts(answer)
+			if err != nil {
+				fmt.Fprintln(out, err)
+				continue
+			}
+		}
+		if err := check(ports); err != nil {
+			fmt.Fprintln(out, err)
+			continue
+		}
+		return ports, nil
+	}
+}
+
+func parsePorts(value string) ([]int, error) {
+	parts := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || strings.ContainsRune(" \t", r)
+	})
+	ports := make([]int, 0, len(parts))
+	for _, part := range parts {
+		port, err := strconv.Atoi(part)
+		if err != nil {
+			return nil, fmt.Errorf("invalid port %q", part)
+		}
+		ports = append(ports, port)
+	}
+	if len(ports) == 0 {
+		return nil, errors.New("enter at least one port")
+	}
+	return ports, nil
+}
+
+func checkHost(name, target, discovery string, include, exclude []int) error {
+	cfg := config.Config{
+		PollInterval:   config.Duration(5 * time.Second),
+		CommandTimeout: config.Duration(15 * time.Second),
+		MaxServices:    256,
+		MaxProcesses:   2048,
+		Hosts: []config.Host{{
+			Name:         name,
+			SSH:          target,
+			Discovery:    discovery,
+			IncludePorts: include,
+			ExcludePorts: exclude,
+		}},
+	}
+	return cfg.Validate()
+}
+
+func validate(body []byte) error {
+	dir, err := os.MkdirTemp("", "onji-config-check-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		return err
+	}
+	_, err = config.Load(path)
+	return err
 }
 
 func ask(in *bufio.Reader, out io.Writer, prompt string) (string, error) {

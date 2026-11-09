@@ -24,10 +24,11 @@ make build
 ./bin/onji --config-init
 ```
 
-This asks you to choose interactive or manual setup, then writes the starter
-template to the default config path. An existing file is replaced only after
-you confirm. Edit the SSH alias and ports. Verify authentication and host
-trust with `ssh YOUR_ALIAS true`, then start the daemon:
+This asks you to choose interactive or manual setup. Interactive setup asks for
+one host: its name, SSH target, discovery mode, automatic forwarding, and ports.
+Manual setup writes the starter template. An existing file is replaced only
+after you confirm. Verify authentication and host trust with
+`ssh YOUR_ALIAS true`, then start the daemon:
 
 ```sh
 ./bin/onjid --check
