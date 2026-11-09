@@ -43,7 +43,8 @@ func runArgs(args []string, in io.Reader, out, errw io.Writer) error {
 --config-init asks whether to set up the onjid config interactively or by hand,
 then writes it to the default path and exits. It does not need a running daemon.
 Interactive setup asks for the host name, SSH target, discovery mode, forwarding,
-and ports. An existing file is replaced only after confirmation.
+and ports. Manual setup opens the template in nvim and installs the saved file
+after it validates. An existing file is replaced only after confirmation.
 
 Commands:
   tui                              Open the terminal UI (default)

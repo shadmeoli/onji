@@ -6,15 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"onji/internal/setup"
 )
 
 func TestConfigInitCommand(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	var stdout, stderr bytes.Buffer
-	if err := runArgs([]string{"--config-init"}, strings.NewReader("manual\n"), &stdout, &stderr); err != nil {
+	if err := runArgs([]string{"--config-init"}, strings.NewReader("interactive\n\nuser@dev\n\n\n\n\n"), &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "onji", "config.json")
@@ -22,7 +20,7 @@ func TestConfigInitCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, setup.Template()) {
+	if !bytes.Contains(got, []byte(`"ssh": "user@dev"`)) {
 		t.Fatalf("wrote:\n%s", got)
 	}
 	if !strings.Contains(stdout.String(), path) {

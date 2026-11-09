@@ -2,7 +2,9 @@ package setup
 
 import (
 	"bytes"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -32,7 +34,7 @@ func TestRunWritesTemplateOnce(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "config", "onji")
 	path := filepath.Join(dir, "config.json")
 	var out bytes.Buffer
-	if err := Run(Options{Path: path, In: strings.NewReader("manual\n"), Out: &out}); err != nil {
+	if err := Run(Options{Path: path, In: strings.NewReader("manual\n"), Out: &out, Editor: keepTemplate}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(path)
@@ -76,7 +78,7 @@ func TestRunAcceptsEitherSetupChoice(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "onji", "config.json")
 	var out bytes.Buffer
 	in := "nope\nmanual\n"
-	if err := Run(Options{Path: path, In: strings.NewReader(in), Out: &out}); err != nil {
+	if err := Run(Options{Path: path, In: strings.NewReader(in), Out: &out, Editor: keepTemplate}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "Enter interactive or manual.") {
@@ -134,3 +136,138 @@ func TestInteractiveSetup(t *testing.T) {
 		t.Fatalf("ports include=%v exclude=%v", host.IncludePorts, host.ExcludePorts)
 	}
 }
+
+func keepTemplate(string) error { return nil }
+
+func TestManualInstallsTheEditedFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "onji", "config.json")
+	var draft string
+	var edited []byte
+	editor := func(filename string) error {
+		draft = filename
+		body, err := os.ReadFile(filename)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(body, Template()) {
+			t.Fatalf("opened:\n%s", body)
+		}
+		edited = bytes.Replace(body, []byte("my-dev-server"), []byte("user@dev"), 1)
+		return os.WriteFile(filename, edited, 0o600)
+	}
+	var out bytes.Buffer
+	if err := Run(Options{Path: path, In: strings.NewReader("m\n"), Out: &out, Editor: editor}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, edited) {
+		t.Fatalf("installed:\n%s", got)
+	}
+	if _, err := config.Load(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(draft); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("draft remained: %v", err)
+	}
+}
+
+func TestManualDoesNotInstallAnInvalidEdit(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "onji")
+	path := filepath.Join(dir, "config.json")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, Template(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var draft string
+	editor := func(filename string) error {
+		draft = filename
+		return os.WriteFile(filename, []byte("{}\n"), 0o600)
+	}
+	err := Run(Options{Path: path, In: strings.NewReader("yes\nmanual\n"), Out: ioDiscard(), Editor: editor})
+	if err == nil || !strings.Contains(err.Error(), "draft kept at "+draft) {
+		t.Fatal(err)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(got, Template()) {
+		t.Fatal("existing config was replaced")
+	}
+	if _, statErr := os.Stat(draft); statErr != nil {
+		t.Fatal(statErr)
+	}
+	t.Cleanup(func() { _ = os.Remove(draft) })
+}
+
+func TestManualEditorFailureLeavesNoConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "onji", "config.json")
+	err := Run(Options{Path: path, In: strings.NewReader("manual\n"), Out: ioDiscard(), Editor: func(string) error {
+		return errors.New("quit")
+	}})
+	if err == nil || !strings.Contains(err.Error(), "quit") {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatal(statErr)
+	}
+}
+
+func TestOpenNvimRequiresATerminalAndRunsNvim(t *testing.T) {
+	pipeRead, pipeWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore := func() {
+		editorStdin = os.Stdin
+		lookPath = exec.LookPath
+		command = exec.Command
+	}
+	t.Cleanup(func() {
+		_ = pipeRead.Close()
+		_ = pipeWrite.Close()
+		restore()
+	})
+	editorStdin = pipeRead
+	lookPath = func(string) (string, error) { return "", errors.New("missing") }
+	if err := openNvim("config.json"); err == nil || !strings.Contains(err.Error(), "terminal") {
+		t.Fatal(err)
+	}
+
+	tty, err := os.Open("/dev/null")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tty.Close() })
+	editorStdin = tty
+	if err := openNvim("config.json"); err == nil || !strings.Contains(err.Error(), "nvim is not installed") {
+		t.Fatal(err)
+	}
+	called := false
+	lookPath = func(name string) (string, error) {
+		if name != "nvim" {
+			t.Fatalf("looked up %s", name)
+		}
+		return "/usr/bin/nvim", nil
+	}
+	command = func(name string, args ...string) *exec.Cmd {
+		called = true
+		if name != "nvim" || len(args) != 1 || args[0] != "config.json" {
+			t.Fatalf("command %s %v", name, args)
+		}
+		return exec.Command("true")
+	}
+	if err := openNvim("config.json"); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("nvim was not started")
+	}
+}
+
+func ioDiscard() *bytes.Buffer { return &bytes.Buffer{} }

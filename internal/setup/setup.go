@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,11 +18,21 @@ import (
 )
 
 // Options controls where the config is written and where messages go.
+// Editor, when set, replaces nvim for manual setup.
 type Options struct {
-	Path string
-	In   io.Reader
-	Out  io.Writer
+	Path   string
+	In     io.Reader
+	Out    io.Writer
+	Editor func(path string) error
 }
+
+var (
+	editorStdin  = os.Stdin
+	editorStdout = os.Stdout
+	editorStderr = os.Stderr
+	lookPath     = exec.LookPath
+	command      = exec.Command
+)
 
 type document struct {
 	PollInterval   string `json:"poll_interval"`
@@ -143,7 +154,11 @@ func Run(opts Options) error {
 			return err
 		}
 	case "manual":
-		body = Template()
+		var err error
+		body, err = manual(opts.Editor)
+		if err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unknown setup mode %q", mode)
 	}
@@ -193,6 +208,67 @@ func choose(in *bufio.Reader, out io.Writer) (string, error) {
 			fmt.Fprintln(out, "Enter interactive or manual.")
 		}
 	}
+}
+
+// manual opens the starter template in nvim. The destination is replaced only
+// after the saved copy validates, so quitting with an error or saving invalid
+// JSON leaves an existing config untouched.
+func manual(editor func(string) error) ([]byte, error) {
+	if editor == nil {
+		editor = openNvim
+	}
+	f, err := os.CreateTemp("", "onji-config-*.json")
+	if err != nil {
+		return nil, err
+	}
+	draft := f.Name()
+	keep := false
+	defer func() {
+		if !keep {
+			_ = os.Remove(draft)
+		}
+	}()
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	if _, err := f.Write(Template()); err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	if err := f.Close(); err != nil {
+		return nil, err
+	}
+	if err := editor(draft); err != nil {
+		return nil, fmt.Errorf("nvim: %w", err)
+	}
+	body, err := os.ReadFile(draft)
+	if err != nil {
+		return nil, err
+	}
+	if err := validate(body); err != nil {
+		keep = true
+		return nil, fmt.Errorf("edited config was not written: %w (draft kept at %s)", err, draft)
+	}
+	return body, nil
+}
+
+func openNvim(path string) error {
+	info, err := editorStdin.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeCharDevice == 0 {
+		return errors.New("manual setup requires a terminal so nvim can open")
+	}
+	if _, err := lookPath("nvim"); err != nil {
+		return errors.New("nvim is not installed")
+	}
+	cmd := command("nvim", path)
+	cmd.Stdin = editorStdin
+	cmd.Stdout = editorStdout
+	cmd.Stderr = editorStderr
+	return cmd.Run()
 }
 
 func interactive(in *bufio.Reader, out io.Writer) ([]byte, error) {

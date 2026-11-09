@@ -26,9 +26,11 @@ make build
 
 This asks you to choose interactive or manual setup. Interactive setup asks for
 one host: its name, SSH target, discovery mode, automatic forwarding, and ports.
-Manual setup writes the starter template. An existing file is replaced only
-after you confirm. Verify authentication and host trust with
-`ssh YOUR_ALIAS true`, then start the daemon:
+Manual setup opens the starter template in nvim. Onji checks the saved file and
+writes it to the default config path. An invalid edit is not installed, and the
+draft path is printed. An existing file is replaced only after you confirm.
+Verify authentication and host trust with `ssh YOUR_ALIAS true`, then start the
+daemon:
 
 ```sh
 ./bin/onjid --check
