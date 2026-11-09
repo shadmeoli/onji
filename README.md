@@ -77,6 +77,29 @@ logout:
 sudo loginctl enable-linger "$USER"
 ```
 
+## Logging
+
+`onji status` is the current snapshot. A host error disappears from it when the
+next poll succeeds, so status is not a history of what happened.
+
+`onjid` writes `slog` to stderr. The lines it writes today are daemon start and
+daemon stop. A foreground `onjid` prints them in that terminal. Under the
+systemd unit, read the same stream with:
+
+```sh
+journalctl --user -u onjid -e
+```
+
+These events belong in that log when they happen:
+
+- SSH connect and disconnect, including the error text and the backoff before the next try.
+- A scan failure that drops that host's tunnels.
+- A forward created, removed, or moved because the preferred local port was taken.
+- The process exiting because another `onjid` already holds the socket.
+
+A successful poll stays out of the log. Forwarded traffic stays out too: those
+bytes are carried by OpenSSH and never enter the Go process.
+
 ## Configuration
 
 The default config is `$XDG_CONFIG_HOME/onji/config.json`, or
