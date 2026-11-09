@@ -14,7 +14,7 @@ func TestConfigInitCommand(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	var stdout, stderr bytes.Buffer
-	if err := runArgs([]string{"--config-init"}, strings.NewReader(""), &stdout, &stderr); err != nil {
+	if err := runArgs([]string{"--config-init"}, strings.NewReader("interactive\n"), &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "onji", "config.json")
@@ -35,7 +35,7 @@ func TestConfigInitCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runArgs([]string{"--config-init"}, strings.NewReader(""), &stdout, &stderr); err == nil {
+	if err := runArgs([]string{"--config-init"}, strings.NewReader("n\n"), &stdout, &stderr); err == nil {
 		t.Fatal("existing config replaced")
 	}
 	after, err := os.ReadFile(path)

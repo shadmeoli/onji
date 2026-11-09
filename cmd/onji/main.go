@@ -36,12 +36,13 @@ func runArgs(args []string, in io.Reader, out, errw io.Writer) error {
 	fs := flag.NewFlagSet("onji", flag.ContinueOnError)
 	fs.SetOutput(errw)
 	socket := fs.String("socket", config.SocketPath(), "daemon Unix socket path")
-	configInit := fs.Bool("config-init", false, "write an onjid config template and exit")
+	configInit := fs.Bool("config-init", false, "set up the onjid configuration and exit")
 	fs.Usage = func() {
 		fmt.Fprintln(errw, `Usage: onji [--socket PATH] [--config-init] [command]
 
---config-init writes a template to the default onjid config path and exits.
-It does not need a running daemon. An existing file is left unchanged.
+--config-init asks whether to set up the onjid config interactively or by hand,
+then writes it to the default path and exits. It does not need a running daemon.
+An existing file is replaced only after confirmation.
 
 Commands:
   tui                              Open the terminal UI (default)

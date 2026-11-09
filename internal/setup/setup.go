@@ -2,6 +2,7 @@
 package setup
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -110,29 +111,90 @@ func formatPorts(ports []int) string {
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
-// Run writes the config template. An existing file is left unchanged.
+// Run asks whether to set the config up interactively or by hand, then writes it.
+// An existing file is replaced only after confirmation.
 func Run(opts Options) error {
 	if opts.Path == "" {
 		return errors.New("config path is required")
 	}
+	if opts.In == nil {
+		return errors.New("input is required")
+	}
 	if opts.Out == nil {
 		opts.Out = io.Discard
 	}
-	info, err := os.Stat(opts.Path)
-	if err == nil {
-		if info.IsDir() {
-			return fmt.Errorf("%s is a directory", opts.Path)
-		}
-		return fmt.Errorf("config already exists: %s", opts.Path)
-	}
-	if !errors.Is(err, os.ErrNotExist) {
+	in := bufio.NewReader(opts.In)
+	if err := confirmReplace(opts.Path, in, opts.Out); err != nil {
 		return err
 	}
-	if err := write(opts.Path, Template()); err != nil {
+	mode, err := choose(in, opts.Out)
+	if err != nil {
+		return err
+	}
+	var body []byte
+	switch mode {
+	case "interactive", "manual":
+		body = Template()
+	default:
+		return fmt.Errorf("unknown setup mode %q", mode)
+	}
+	if err := write(opts.Path, body); err != nil {
 		return err
 	}
 	fmt.Fprintf(opts.Out, "wrote %s\n", opts.Path)
 	return nil
+}
+
+func confirmReplace(path string, in *bufio.Reader, out io.Writer) error {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%s is a directory", path)
+	}
+	answer, err := ask(in, out, path+" already exists. Replace it? [y/N]: ")
+	if err != nil {
+		return err
+	}
+	if strings.ToLower(answer) != "y" && strings.ToLower(answer) != "yes" {
+		return errors.New("cancelled")
+	}
+	return nil
+}
+
+func choose(in *bufio.Reader, out io.Writer) (string, error) {
+	fmt.Fprintln(out, "Set up the onjid config.")
+	fmt.Fprintln(out, "  interactive  answer the base questions")
+	fmt.Fprintln(out, "  manual       edit the template in nvim")
+	for {
+		answer, err := ask(in, out, "Choose [interactive/manual]: ")
+		if err != nil {
+			return "", err
+		}
+		switch strings.ToLower(answer) {
+		case "i", "interactive":
+			return "interactive", nil
+		case "m", "manual":
+			return "manual", nil
+		default:
+			fmt.Fprintln(out, "Enter interactive or manual.")
+		}
+	}
+}
+
+func ask(in *bufio.Reader, out io.Writer, prompt string) (string, error) {
+	if _, err := fmt.Fprint(out, prompt); err != nil {
+		return "", err
+	}
+	line, err := in.ReadString('\n')
+	if len(line) == 0 && err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
 }
 
 func write(path string, body []byte) error {

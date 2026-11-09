@@ -24,8 +24,9 @@ make build
 ./bin/onji --config-init
 ```
 
-This writes `config.example.json` to the default config path. An existing file
-is left unchanged. Edit the SSH alias and ports. Verify authentication and host
+This asks you to choose interactive or manual setup, then writes the starter
+template to the default config path. An existing file is replaced only after
+you confirm. Edit the SSH alias and ports. Verify authentication and host
 trust with `ssh YOUR_ALIAS true`, then start the daemon:
 
 ```sh
