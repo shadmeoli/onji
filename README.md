@@ -39,8 +39,14 @@ daemon:
 
 In another terminal, open the TUI with `./bin/onji`.
 
-`onjid` stays in the foreground for supervision. To keep it running independently
-of your terminal, install the optional systemd user service:
+`onjid` stays in the foreground so a supervisor can manage it. It has no
+background flag. The next section runs this same binary in the background.
+
+## Run onjid in the background
+
+Use the systemd user unit in `packaging/systemd/onjid.service`. It starts
+`~/.local/bin/onjid`, restarts it 5 seconds after a failure, and stops the SSH
+children when the daemon stops. No `onjid` or `onji` command change is involved.
 
 ```sh
 make install
@@ -50,10 +56,26 @@ systemctl --user daemon-reload
 systemctl --user enable --now onjid
 ```
 
-The unit expects binaries in `~/.local/bin` and the default config path. A user
-service normally follows your login session; running after logout requires
-systemd user lingering to be enabled. Stop it with `systemctl --user stop onjid`.
-Do not run a second daemon on the same socket.
+`make install` puts the binaries in `~/.local/bin`. The unit reads the default
+config path. Check it, restart it after a config edit, read its log, or stop it:
+
+```sh
+systemctl --user status onjid
+systemctl --user restart onjid
+journalctl --user -u onjid -e
+systemctl --user stop onjid
+```
+
+Run only one daemon. A second `onjid`, including one left in a terminal, exits
+with `another onjid instance is using this socket`, and systemd keeps retrying.
+Press Ctrl+C in that terminal, then run `systemctl --user restart onjid`.
+
+A user service stops when your login session ends. To keep the tunnels after
+logout:
+
+```sh
+sudo loginctl enable-linger "$USER"
+```
 
 ## Configuration
 
