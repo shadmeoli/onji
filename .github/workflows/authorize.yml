@@ -1,0 +1,100 @@
+# Fails the run unless the actor is allowlisted. It does not reject the git push
+# itself: anyone who can push master can also delete this file in that push.
+name: Authorize
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master, beta]
+    types: [opened, reopened, synchronize, ready_for_review]
+  release:
+    types: [created, published, prereleased]
+permissions:
+  contents: read
+  pull-requests: read
+env:
+  ALLOWED_ACTORS: shadmeoli
+jobs:
+  master:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Allow listed users to push master
+        env:
+          ACTOR: ${{ github.actor }}
+        run: |
+          case " ${ALLOWED_ACTORS} " in
+            *" ${ACTOR} "*) exit 0 ;;
+          esac
+          echo "Push to master is limited to:${ALLOWED_ACTORS}. ${ACTOR} is not allowed."
+          exit 1
+  pull-request:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Do not create a release from a pull request
+        env:
+          BASE: ${{ github.base_ref }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          case "$BASE" in
+            master|beta) ;;
+            *) echo "Pull request #${NUMBER} targets ${BASE}. No release rule applies."
+               exit 0 ;;
+          esac
+          echo "Pull request #${NUMBER} against ${BASE} does not create a release."
+          echo "A release of its commit is kept only after an approval from:${ALLOWED_ACTORS}."
+  release:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Allow a release only from listed users, and only their approval on master or beta
+        env:
+          ACTOR: ${{ github.actor }}
+          TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          allowed() {
+            case " ${ALLOWED_ACTORS} " in
+              *" $1 "*) return 0 ;;
+            esac
+            return 1
+          }
+          refuse() {
+            echo "$1"
+            gh release delete "${TAG}" --yes --cleanup-tag || true
+            exit 1
+          }
+          if ! allowed "${ACTOR}"; then
+            refuse "Release creation is limited to:${ALLOWED_ACTORS}. ${ACTOR} is not allowed."
+          fi
+          sha=$(gh api "repos/${GH_REPO}/commits/${TAG}" --jq .sha) || {
+            echo "Could not resolve ${TAG}. The release was left in place and this check failed."
+            exit 1
+          }
+          numbers=$(gh api --paginate "repos/${GH_REPO}/commits/${sha}/pulls" \
+            --jq '.[] | select(.base.ref == "master" or .base.ref == "beta") | .number') || {
+            echo "Could not list pull requests for ${sha}. The release was left in place and this check failed."
+            exit 1
+          }
+          for number in ${numbers}; do
+            approvers=$(gh api --paginate "repos/${GH_REPO}/pulls/${number}/reviews" \
+              --jq 'group_by(.user.login) | .[] | .[-1] | select(.state == "APPROVED") | .user.login') || {
+              echo "Could not read reviews for pull request #${number}. The release was left in place and this check failed."
+              exit 1
+            }
+            approved=0
+            for login in ${approvers}; do
+              if allowed "${login}"; then
+                approved=1
+              fi
+            done
+            if [ "${approved}" -ne 1 ]; then
+              refuse "Release ${TAG} includes pull request #${number} against master or beta without an approval from:${ALLOWED_ACTORS}."
+            fi
+          done
+          echo "Release ${TAG} is allowed."
