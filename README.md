@@ -219,6 +219,18 @@ Go's GC defaults are retained. You can set `GOMEMLIMIT` after measuring the
 workload; it is a soft Go-runtime limit, excludes SSH children, and does not cap
 total RSS. Periodic forced GC or restarts are not part of normal operation.
 
+## Versioning
+
+Tags use `v<major>.<major-addition>.<patch>`:
+
+- **major** is a break that existing setups cannot keep.
+- **major-addition** is a capability existing setups can keep.
+- **patch** is a fix or bug correction.
+
+`v0.0.1` is major 0, addition 0, patch 1. The same commit is published on
+`master` and `beta`. Git keeps one tag named `v0.0.1`, so the beta channel uses
+the prerelease tag `v0.0.1-beta`.
+
 ## Development and verification
 
 ```sh
