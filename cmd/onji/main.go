@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 
 	"onji/internal/config"
 	"onji/internal/ipc"
+	"onji/internal/setup"
 	"onji/internal/tui"
 )
 
@@ -27,9 +29,19 @@ func main() {
 	}
 }
 func run() error {
-	socket := flag.String("socket", config.SocketPath(), "daemon Unix socket path")
-	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, `Usage: onji [--socket PATH] [command]
+	return runArgs(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
+}
+
+func runArgs(args []string, in io.Reader, out, errw io.Writer) error {
+	fs := flag.NewFlagSet("onji", flag.ContinueOnError)
+	fs.SetOutput(errw)
+	socket := fs.String("socket", config.SocketPath(), "daemon Unix socket path")
+	configInit := fs.Bool("config-init", false, "write an onjid config template and exit")
+	fs.Usage = func() {
+		fmt.Fprintln(errw, `Usage: onji [--socket PATH] [--config-init] [command]
+
+--config-init writes a template to the default onjid config path and exits.
+It does not need a running daemon. An existing file is left unchanged.
 
 Commands:
   tui                              Open the terminal UI (default)
@@ -40,14 +52,25 @@ Commands:
 
 Use the exact service ID shown by status, for example 127.0.0.1:3000.
 Closing onji leaves onjid and its tunnels running.`)
-		flag.PrintDefaults()
+		fs.PrintDefaults()
 	}
-	flag.Parse()
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if *configInit {
+		if fs.NArg() != 0 {
+			return errors.New("usage: onji --config-init")
+		}
+		return setup.Run(setup.Options{Path: config.DefaultPath(), In: in, Out: out})
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	client := ipc.NewClient(*socket)
 	defer client.Close()
-	args := flag.Args()
+	args = fs.Args()
 	if len(args) == 0 {
 		args = []string{"tui"}
 	}

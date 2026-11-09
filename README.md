@@ -21,12 +21,12 @@ packages. Other operating systems are not supported in this version.
 
 ```sh
 make build
-mkdir -p ~/.config/onji
-cp config.example.json ~/.config/onji/config.json
+./bin/onji --config-init
 ```
 
-Edit the config with your SSH alias and desired ports. Verify authentication and
-host trust with `ssh YOUR_ALIAS true`, then start the daemon:
+This writes `config.example.json` to the default config path. An existing file
+is left unchanged. Edit the SSH alias and ports. Verify authentication and host
+trust with `ssh YOUR_ALIAS true`, then start the daemon:
 
 ```sh
 ./bin/onjid --check
